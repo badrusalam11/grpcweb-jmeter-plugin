@@ -73,6 +73,12 @@ public class GrpcWebSampler extends AbstractSampler implements TestStateListener
             }
             req.setHeaders(parseCustomHeaders());
 
+            result.setSampleLabel("gRPC-Web Sampler");
+            result.setDataType(SampleResult.TEXT);
+            result.setContentType("application/json");
+            // Set request body to JMeter viewer
+            result.setSamplerData(getRequestJson()); // <-- this shows the request in JMeter UI
+
             result.sampleStart();
             GrpcWebResponse resp = grpcClient.executeRequest(req);
             result.sampleEnd();
