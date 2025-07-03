@@ -5,6 +5,8 @@ import com.badru.jmeter.grpcweb.client.GrpcWebClient;
 import com.badru.jmeter.grpcweb.client.GrpcWebClient.GrpcWebRequest;
 import com.badru.jmeter.grpcweb.client.GrpcWebClient.GrpcWebResponse;
 import com.badru.jmeter.grpcweb.util.ProtoFileParser;
+import com.google.protobuf.DynamicMessage;
+import com.google.protobuf.util.JsonFormat;
 import org.apache.jmeter.samplers.AbstractSampler;
 import org.apache.jmeter.samplers.Entry;
 import org.apache.jmeter.samplers.SampleResult;
@@ -80,11 +82,13 @@ public class GrpcWebSampler extends AbstractSampler implements TestStateListener
             result.setResponseMessage(resp.getGrpcStatus() == 0 ? "OK" : resp.getGrpcMessage());
             result.setLatency(resp.getResponseTime());
 
-                        // Wrap raw token bytes into JSON, stripping any non-printable prefix
-            String rawToken = new String(resp.getMessageBytes(), StandardCharsets.UTF_8);
-            // Remove non-base64 characters at the start (e.g., gRPC frame flag)
-            rawToken = rawToken.replaceAll("^[^A-Za-z0-9_-]+", "");
-            String responseJson = String.format("{\"token\":\"%s\"}", rawToken);
+            // Convert entire protobuf response message to JSON dynamically
+            DynamicMessage.Builder builder = parser.getOutputMessageBuilder(
+                    getServiceName(), getMethodName());
+            builder.mergeFrom(resp.getMessageBytes());
+            String responseJson = JsonFormat.printer()
+                    .includingDefaultValueFields()
+                    .print(builder);
             result.setResponseData(responseJson, StandardCharsets.UTF_8.name());
         } catch (Exception e) {
             result.sampleEnd();

@@ -1,3 +1,4 @@
+// File: src/main/java/com/badru/jmeter/grpcweb/util/ProtoFileParser.java
 package com.badru.jmeter.grpcweb.util;
 
 import com.google.protobuf.DescriptorProtos;
@@ -20,24 +21,20 @@ public class ProtoFileParser {
     private Map<String, List<String>> serviceToMethods = new HashMap<>();
     private Map<String, Map<String, String>> serviceMethodToRequestType = new HashMap<>();
     private Map<String, Map<String, String>> serviceMethodToResponseType = new HashMap<>();
+    private Map<String, Descriptors.ServiceDescriptor> serviceDescriptors = new HashMap<>();
     private String packageName = "";
 
-    /**
-     * Parse proto file AND build descriptor set in-memory via protoc
-     */
     public void parseProtoFile(String protoFilePath) throws Exception {
         this.protoPath = Paths.get(protoFilePath);
         if (!Files.exists(protoPath)) {
             throw new FileNotFoundException("Proto file not found: " + protoFilePath);
         }
 
-        // Read raw content and do text-based parsing for GUI dropdowns
         String protoContent = new String(Files.readAllBytes(protoPath), StandardCharsets.UTF_8);
         String cleaned = removeComments(protoContent);
         extractPackageName(cleaned);
         parseServices(cleaned);
 
-        // Attempt to generate descriptor set via protoc (for DynamicMessage support)
         try {
             Path descOut = Files.createTempFile("desc", ".pb");
             String protoDir = protoPath.getParent().toString();
@@ -51,7 +48,6 @@ public class ProtoFileParser {
             pb.directory(new File(protoDir));
             Process proc = pb.start();
 
-            // Capture protoc stderr
             ByteArrayOutputStream errStream = new ByteArrayOutputStream();
             try (InputStream es = proc.getErrorStream()) {
                 byte[] buf = new byte[1024];
@@ -66,13 +62,11 @@ public class ProtoFileParser {
                 throw new IOException("protoc failed (exit " + exit + "): " + errMsg);
             }
 
-            // Load descriptor set
             DescriptorProtos.FileDescriptorSet set;
             try (InputStream is = Files.newInputStream(descOut)) {
                 set = DescriptorProtos.FileDescriptorSet.parseFrom(is);
             }
 
-            // Build FileDescriptor objects
             Map<String, Descriptors.FileDescriptor> nameToFd = new HashMap<>();
             for (DescriptorProtos.FileDescriptorProto fdp : set.getFileList()) {
                 List<Descriptors.FileDescriptor> deps = new ArrayList<>();
@@ -87,7 +81,6 @@ public class ProtoFileParser {
                 nameToFd.put(fdp.getName(), fd);
             }
 
-            // Locate our proto descriptor
             String fileName = protoPath.getFileName().toString();
             fileDescriptor = nameToFd.get(fileName);
             if (fileDescriptor == null) {
@@ -100,6 +93,10 @@ public class ProtoFileParser {
             }
             if (fileDescriptor == null) {
                 throw new IOException("Failed to locate descriptor for " + protoPath);
+            }
+
+            for (Descriptors.ServiceDescriptor svc : fileDescriptor.getServices()) {
+                serviceDescriptors.put(svc.getName(), svc);
             }
         } catch (Exception ex) {
             System.err.println("[ProtoFileParser] protoc descriptor generation failed: " + ex.getMessage());
@@ -152,9 +149,6 @@ public class ProtoFileParser {
         if (m.find()) this.packageName = m.group(1);
     }
 
-    /**
-     * Create a DynamicMessage using in-memory FileDescriptor
-     */
     public DynamicMessage createMessageFromJson(
         String serviceName,
         String methodName,
@@ -176,7 +170,19 @@ public class ProtoFileParser {
         return builder.build();
     }
 
-    // Getter methods for GUI
+    public DynamicMessage.Builder getOutputMessageBuilder(String serviceName, String methodName) {
+        Descriptors.MethodDescriptor method = getMethodDescriptor(serviceName, methodName);
+        return DynamicMessage.newBuilder(method.getOutputType());
+    }
+
+    public Descriptors.MethodDescriptor getMethodDescriptor(String serviceName, String methodName) {
+        Descriptors.ServiceDescriptor service = serviceDescriptors.get(serviceName);
+        if (service == null) throw new IllegalArgumentException("Service not found: " + serviceName);
+        Descriptors.MethodDescriptor method = service.findMethodByName(methodName);
+        if (method == null) throw new IllegalArgumentException("Method not found: " + methodName);
+        return method;
+    }
+
     public Set<String> getServices() { return serviceToMethods.keySet(); }
     public List<String> getMethodsForService(String svc) {
         List<String> list = serviceToMethods.get(svc);
