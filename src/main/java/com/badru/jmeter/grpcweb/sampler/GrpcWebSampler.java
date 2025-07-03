@@ -43,14 +43,18 @@ public class GrpcWebSampler extends AbstractSampler implements TestStateListener
     
     @Override
     public SampleResult sample(Entry entry) {
+        System.out.println("🎯 SAMPLE METHOD CALLED - Starting gRPC-Web request");
+        
         SampleResult result = new SampleResult();
         result.setSampleLabel(getName());
         result.setDataType(SampleResult.TEXT);
         
         try {
+            System.out.println("🔧 Step 1: Initialize if needed");
             // Initialize if needed
             initializeIfNeeded();
             
+            System.out.println("🔧 Step 2: Get proto parser");
             // Get or create proto parser - THIS FIXES THE EMPTY STATE ISSUE!
             ProtoFileParser parser = getOrCreateProtoParser();
             
@@ -58,15 +62,19 @@ public class GrpcWebSampler extends AbstractSampler implements TestStateListener
                 throw new RuntimeException("Proto file not parsed. Please parse the proto file first in the GUI.");
             }
             
+            System.out.println("🔧 Step 3: Prepare request");
             // Prepare request
             GrpcWebClient.GrpcWebRequest request = prepareRequest(parser);
             
+            System.out.println("🔧 Step 4: Start timing and execute request");
             // Start timing
             result.sampleStart();
             
+            System.out.println("🚀 Step 5: About to call grpcClient.executeRequest()");
             // Execute request
             GrpcWebClient.GrpcWebResponse response = grpcClient.executeRequest(request);
             
+            System.out.println("✅ Step 6: Request completed, processing response");
             // Stop timing
             result.sampleEnd();
             
@@ -74,6 +82,9 @@ public class GrpcWebSampler extends AbstractSampler implements TestStateListener
             processResponse(result, response);
             
         } catch (Exception e) {
+            System.out.println("❌ EXCEPTION CAUGHT: " + e.getClass().getSimpleName() + ": " + e.getMessage());
+            e.printStackTrace(); // This will show the full stack trace
+            
             log.error("Error executing gRPC-Web request", e);
             result.sampleEnd();
             result.setSuccessful(false);
@@ -84,7 +95,6 @@ public class GrpcWebSampler extends AbstractSampler implements TestStateListener
         
         return result;
     }
-    
     /**
      * Get or create proto parser from cache - THIS IS THE KEY FIX!
      */
@@ -181,6 +191,11 @@ public class GrpcWebSampler extends AbstractSampler implements TestStateListener
     }
     
     private GrpcWebClient.GrpcWebRequest prepareRequest(ProtoFileParser parser) throws Exception {
+        System.out.println("🔧 PREPARING REQUEST:");
+        System.out.println("  📦 Package from parser: " + (parser != null ? parser.getPackageName() : "null"));
+        System.out.println("  🔧 Service: " + getServiceName());
+        System.out.println("  📝 Method: " + getMethodName());
+        
         GrpcWebClient.GrpcWebRequest request = new GrpcWebClient.GrpcWebRequest();
         
         // Set package name if available
@@ -203,11 +218,30 @@ public class GrpcWebSampler extends AbstractSampler implements TestStateListener
         if (!headers.isEmpty()) {
             request.setHeaders(headers);
         }
+
+        // ADD THIS DEBUG TO MANUALLY BUILD URL
+        String serverUrl = getServerUrl();
+        String packageName = parser != null ? parser.getPackageName() : "";
+        String serviceName = getServiceName();
+        String methodName = getMethodName();
+        String expectedUrl;
+        if (packageName != null && !packageName.isEmpty()) {
+            expectedUrl = String.format("%s/%s.%s/%s", serverUrl, packageName, serviceName, methodName);
+        } else {
+            expectedUrl = String.format("%s/%s/%s", serverUrl, serviceName, methodName);
+        }
+        System.out.println("🎯 EXPECTED URL SHOULD BE: " + expectedUrl);
+        System.out.println("🔗 Compare this with Kreya's URL!");
         
         return request;
     }
     
     private void processResponse(SampleResult result, GrpcWebClient.GrpcWebResponse response) {
+        System.out.println("📊 PROCESSING RESPONSE:");
+        System.out.println("  📟 HTTP Status: " + response.getHttpStatusCode());
+        System.out.println("  🎯 gRPC Status: " + response.getGrpcStatus());
+        System.out.println("  💬 gRPC Message: " + response.getGrpcMessage());
+
         result.setSuccessful(response.isSuccessful());
         result.setResponseCode(String.valueOf(response.getHttpStatusCode()));
         

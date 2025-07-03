@@ -111,11 +111,10 @@ public class GrpcWebClient {
     }
     
     /**
-     * Create gRPC-Web frame format:
-     * [Compressed-Flag][Length][Message][Trailer-Flag][Trailer-Length][Trailers]
+     * Create gRPC-Web frame format - simplified to match Kreya
      */
     private byte[] createGrpcWebFrame(byte[] messageBytes) {
-        // Simple implementation - no compression, no trailers for now
+        // Simplified approach - just add the 5-byte header
         byte[] frame = new byte[5 + messageBytes.length];
         
         // Compression flag (1 byte) - 0 for no compression
@@ -128,8 +127,12 @@ public class GrpcWebClient {
         frame[3] = (byte) ((length >> 8) & 0xFF);
         frame[4] = (byte) (length & 0xFF);
         
-        // Message bytes
+        // Message bytes (the JSON as UTF-8)
         System.arraycopy(messageBytes, 0, frame, 5, messageBytes.length);
+        
+        System.out.println("📦 Created gRPC-Web frame: " + frame.length + " bytes total");
+        System.out.println("  📏 Header: 5 bytes");
+        System.out.println("  📄 Message: " + messageBytes.length + " bytes");
         
         return frame;
     }
