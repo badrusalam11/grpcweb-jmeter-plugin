@@ -208,10 +208,22 @@ public class GrpcWebSampler extends AbstractSampler implements TestStateListener
         request.setUseTextFormat(getUseTextFormat());
         
         // Use JSON request
-        String requestJson = getRequestJson();
-        if (requestJson != null && !requestJson.trim().isEmpty()) {
-            request.setJsonRequest(requestJson);
+        // String requestJson = getRequestJson();
+        // if (requestJson != null && !requestJson.trim().isEmpty()) {
+        //     request.setJsonRequest(requestJson);
+        // }
+        // in GrpcWebSampler.prepareRequest(...)
+        String json = getRequestJson();
+        if (json != null && !json.trim().isEmpty()) {
+            // THIS REPLACES jsonToProtobufBytes(...)
+            DynamicMessage msg = parser.createMessageFromJson(
+                getServiceName(),
+                getMethodName(),
+                json
+            );
+            request.setMessage(msg);
         }
+
         
         // Parse custom headers
         Map<String, String> headers = parseCustomHeaders();

@@ -5,236 +5,191 @@ import com.google.protobuf.Descriptors;
 import com.google.protobuf.DynamicMessage;
 import com.google.protobuf.util.JsonFormat;
 
-import java.io.BufferedReader;
-import java.io.File;
-import java.io.FileReader;
-import java.io.IOException;
+import java.io.*;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class ProtoFileParser {
-    private Map<String, List<String>> serviceToMethods;
-    private Map<String, Map<String, String>> serviceMethodToRequestType;
-    private Map<String, Map<String, String>> serviceMethodToResponseType;
+    private Path protoPath;
+    private Descriptors.FileDescriptor fileDescriptor;
+    private Map<String, List<String>> serviceToMethods = new HashMap<>();
+    private Map<String, Map<String, String>> serviceMethodToRequestType = new HashMap<>();
+    private Map<String, Map<String, String>> serviceMethodToResponseType = new HashMap<>();
     private String packageName = "";
-    
-    public ProtoFileParser() {
-        this.serviceToMethods = new HashMap<>();
-        this.serviceMethodToRequestType = new HashMap<>();
-        this.serviceMethodToResponseType = new HashMap<>();
-    }
-    
+
     /**
-     * Parse proto file and extract service definitions
+     * Parse proto file AND build descriptor set in-memory via protoc
      */
     public void parseProtoFile(String protoFilePath) throws Exception {
-        File protoFile = new File(protoFilePath);
-        if (!protoFile.exists()) {
-            throw new IOException("Proto file not found: " + protoFilePath);
+        this.protoPath = Paths.get(protoFilePath);
+        if (!Files.exists(protoPath)) {
+            throw new FileNotFoundException("Proto file not found: " + protoFilePath);
         }
-        
-        String protoContent = readFileContent(protoFile);
-        parseProtoContent(protoContent);
-    }
-    
-    private String readFileContent(File file) throws IOException {
-        StringBuilder content = new StringBuilder();
-        try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                content.append(line).append("\n");
+
+        // Read raw content and do text-based parsing for GUI dropdowns
+        String protoContent = new String(Files.readAllBytes(protoPath), StandardCharsets.UTF_8);
+        String cleaned = removeComments(protoContent);
+        extractPackageName(cleaned);
+        parseServices(cleaned);
+
+        // Attempt to generate descriptor set via protoc (for DynamicMessage support)
+        try {
+            Path descOut = Files.createTempFile("desc", ".pb");
+            String protoDir = protoPath.getParent().toString();
+            ProcessBuilder pb = new ProcessBuilder(
+                "protoc",
+                "--descriptor_set_out=" + descOut.toAbsolutePath(),
+                "--include_imports",
+                "-I", protoDir,
+                protoPath.getFileName().toString()
+            );
+            pb.directory(new File(protoDir));
+            Process proc = pb.start();
+
+            // Capture protoc stderr
+            ByteArrayOutputStream errStream = new ByteArrayOutputStream();
+            try (InputStream es = proc.getErrorStream()) {
+                byte[] buf = new byte[1024];
+                int len;
+                while ((len = es.read(buf)) != -1) {
+                    errStream.write(buf, 0, len);
+                }
             }
+            int exit = proc.waitFor();
+            if (exit != 0) {
+                String errMsg = new String(errStream.toByteArray(), StandardCharsets.UTF_8);
+                throw new IOException("protoc failed (exit " + exit + "): " + errMsg);
+            }
+
+            // Load descriptor set
+            DescriptorProtos.FileDescriptorSet set;
+            try (InputStream is = Files.newInputStream(descOut)) {
+                set = DescriptorProtos.FileDescriptorSet.parseFrom(is);
+            }
+
+            // Build FileDescriptor objects
+            Map<String, Descriptors.FileDescriptor> nameToFd = new HashMap<>();
+            for (DescriptorProtos.FileDescriptorProto fdp : set.getFileList()) {
+                List<Descriptors.FileDescriptor> deps = new ArrayList<>();
+                for (String depName : fdp.getDependencyList()) {
+                    Descriptors.FileDescriptor depFd = nameToFd.get(depName);
+                    if (depFd != null) deps.add(depFd);
+                }
+                Descriptors.FileDescriptor fd = Descriptors.FileDescriptor.buildFrom(
+                    fdp,
+                    deps.toArray(new Descriptors.FileDescriptor[0])
+                );
+                nameToFd.put(fdp.getName(), fd);
+            }
+
+            // Locate our proto descriptor
+            String fileName = protoPath.getFileName().toString();
+            fileDescriptor = nameToFd.get(fileName);
+            if (fileDescriptor == null) {
+                for (Descriptors.FileDescriptor fd : nameToFd.values()) {
+                    if (fd.getName().equals(fileName)) {
+                        fileDescriptor = fd;
+                        break;
+                    }
+                }
+            }
+            if (fileDescriptor == null) {
+                throw new IOException("Failed to locate descriptor for " + protoPath);
+            }
+        } catch (Exception ex) {
+            System.err.println("[ProtoFileParser] protoc descriptor generation failed: " + ex.getMessage());
         }
-        return content.toString();
     }
-    
-    private void parseProtoContent(String content) throws Exception {
-        // Clear previous data
+
+    private void parseServices(String content) {
         serviceToMethods.clear();
         serviceMethodToRequestType.clear();
         serviceMethodToResponseType.clear();
-        packageName = "";
-        
-        // Remove comments first
-        content = removeComments(content);
-        
-        // Extract package name
-        extractPackageName(content);
-        
-        // Parse all services
-        Pattern servicePattern = Pattern.compile(
-            "service\\s+(\\w+)\\s*\\{([^{}]*(?:\\{[^{}]*\\}[^{}]*)*)\\}",
+
+        Pattern svcPat = Pattern.compile(
+            "service\\s+(\\w+)\\s*\\{([^{}]*)\\}",
             Pattern.DOTALL | Pattern.CASE_INSENSITIVE
         );
-        
-        Matcher serviceMatcher = servicePattern.matcher(content);
-        
-        while (serviceMatcher.find()) {
-            String serviceName = serviceMatcher.group(1);
-            String serviceBody = serviceMatcher.group(2);
-            
-            System.out.println("Parsing service: " + serviceName);
-            
-            parseServiceMethods(serviceName, serviceBody);
-        }
-        
-        System.out.println("Package: " + packageName);
-        System.out.println("Total services found: " + serviceToMethods.size());
-        for (String service : serviceToMethods.keySet()) {
-            System.out.println("Service: " + service + " with " + serviceToMethods.get(service).size() + " methods");
+        Matcher svcMat = svcPat.matcher(content);
+        while (svcMat.find()) {
+            String svcName = svcMat.group(1);
+            String body = svcMat.group(2);
+            List<String> methods = new ArrayList<>();
+            Map<String, String> req = new HashMap<>();
+            Map<String, String> res = new HashMap<>();
+            Pattern rpcPat = Pattern.compile(
+                "rpc\\s+(\\w+)\\s*\\(\\s*(\\w+)\\s*\\)\\s*returns\\s*\\(\\s*(\\w+)\\s*\\)",
+                Pattern.CASE_INSENSITIVE
+            );
+            Matcher rpcMat = rpcPat.matcher(body);
+            while (rpcMat.find()) {
+                String m = rpcMat.group(1);
+                methods.add(m);
+                req.put(m, rpcMat.group(2));
+                res.put(m, rpcMat.group(3));
+            }
+            if (!methods.isEmpty()) {
+                serviceToMethods.put(svcName, methods);
+                serviceMethodToRequestType.put(svcName, req);
+                serviceMethodToResponseType.put(svcName, res);
+            }
         }
     }
-    
+
+    private String removeComments(String s) {
+        s = s.replaceAll("//.*?(?=\\n|$)", "");
+        s = s.replaceAll("/\\*.*?\\*/", "");
+        return s;
+    }
+
     private void extractPackageName(String content) {
-        Pattern packagePattern = Pattern.compile("package\\s+(\\w+(?:\\.\\w+)*);", Pattern.CASE_INSENSITIVE);
-        Matcher packageMatcher = packagePattern.matcher(content);
-        
-        if (packageMatcher.find()) {
-            packageName = packageMatcher.group(1);
-            System.out.println("Found package: " + packageName);
+        Matcher m = Pattern.compile("package\\s+([\\w.]+);", Pattern.CASE_INSENSITIVE).matcher(content);
+        if (m.find()) this.packageName = m.group(1);
+    }
+
+    /**
+     * Create a DynamicMessage using in-memory FileDescriptor
+     */
+    public DynamicMessage createMessageFromJson(
+        String serviceName,
+        String methodName,
+        String jsonInput
+    ) throws Exception {
+        if (fileDescriptor == null) {
+            throw new IllegalStateException("Descriptor not initialized, JSON conversion unavailable");
         }
+        Descriptors.ServiceDescriptor svc = fileDescriptor.findServiceByName(serviceName);
+        if (svc == null) throw new IllegalArgumentException("Service not found: " + serviceName);
+        Descriptors.MethodDescriptor mth = svc.findMethodByName(methodName);
+        if (mth == null) throw new IllegalArgumentException("Method not found: " + methodName);
+
+        Descriptors.Descriptor inType = mth.getInputType();
+        DynamicMessage.Builder builder = DynamicMessage.newBuilder(inType);
+        JsonFormat.parser()
+            .ignoringUnknownFields()
+            .merge(jsonInput, builder);
+        return builder.build();
     }
-    
-    private void parseServiceMethods(String serviceName, String serviceBody) {
-        List<String> methods = new ArrayList<>();
-        Map<String, String> requestTypes = new HashMap<>();
-        Map<String, String> responseTypes = new HashMap<>();
-        
-        // Pattern to match RPC definitions
-        Pattern rpcPattern = Pattern.compile(
-            "rpc\\s+(\\w+)\\s*\\(\\s*(\\w+)\\s*\\)\\s*returns\\s*\\(\\s*(\\w+)\\s*\\)\\s*;",
-            Pattern.CASE_INSENSITIVE | Pattern.MULTILINE
-        );
-        
-        Matcher rpcMatcher = rpcPattern.matcher(serviceBody);
-        
-        while (rpcMatcher.find()) {
-            String methodName = rpcMatcher.group(1);
-            String requestType = rpcMatcher.group(2);
-            String responseType = rpcMatcher.group(3);
-            
-            methods.add(methodName);
-            requestTypes.put(methodName, requestType);
-            responseTypes.put(methodName, responseType);
-            
-            System.out.println("  Method: " + methodName + "(" + requestType + ") -> " + responseType);
-        }
-        
-        if (!methods.isEmpty()) {
-            serviceToMethods.put(serviceName, methods);
-            serviceMethodToRequestType.put(serviceName, requestTypes);
-            serviceMethodToResponseType.put(serviceName, responseTypes);
-        }
+
+    // Getter methods for GUI
+    public Set<String> getServices() { return serviceToMethods.keySet(); }
+    public List<String> getMethodsForService(String svc) {
+        List<String> list = serviceToMethods.get(svc);
+        return list != null ? list : Collections.<String>emptyList();
     }
-    
-    private String removeComments(String content) {
-        // Remove single-line comments
-        content = content.replaceAll("//.*?(?=\\n|$)", "");
-        
-        // Remove multi-line comments
-        content = content.replaceAll("/\\*.*?\\*/", "");
-        
-        return content;
+    public String getRequestType(String svc, String m) {
+        Map<String, String> map = serviceMethodToRequestType.get(svc);
+        return (map != null) ? map.get(m) : null;
     }
-    
-    /**
-     * Get all available services
-     */
-    public Set<String> getServices() {
-        return serviceToMethods.keySet();
+    public String getResponseType(String svc, String m) {
+        Map<String, String> map = serviceMethodToResponseType.get(svc);
+        return (map != null) ? map.get(m) : null;
     }
-    
-    /**
-     * Get methods for a specific service
-     */
-    public List<String> getMethodsForService(String serviceName) {
-        return serviceToMethods.getOrDefault(serviceName, new ArrayList<>());
-    }
-    
-    /**
-     * Get request type for a specific service and method
-     */
-    public String getRequestType(String serviceName, String methodName) {
-        Map<String, String> methods = serviceMethodToRequestType.get(serviceName);
-        return methods != null ? methods.get(methodName) : null;
-    }
-    
-    /**
-     * Get response type for a specific service and method
-     */
-    public String getResponseType(String serviceName, String methodName) {
-        Map<String, String> methods = serviceMethodToResponseType.get(serviceName);
-        return methods != null ? methods.get(methodName) : null;
-    }
-    
-    /**
-     * Create a DynamicMessage from JSON input
-     * Note: This is a simplified implementation for demo purposes
-     * In production, you'd want proper protobuf compilation
-     */
-    public DynamicMessage createMessageFromJson(String serviceName, String methodName, String jsonInput) throws Exception {
-        // For now, return null - this would need proper protobuf descriptor support
-        // This is where you'd integrate with protoc-generated descriptors
-        throw new UnsupportedOperationException("Dynamic message creation requires protobuf descriptors. " +
-            "For now, the plugin handles JSON-to-protobuf conversion in the client layer.");
-    }
-    
-    /**
-     * Convert DynamicMessage response to JSON
-     */
-    public String messageToJson(DynamicMessage message) throws Exception {
-        return JsonFormat.printer()
-                .includingDefaultValueFields()
-                .preservingProtoFieldNames()
-                .print(message);
-    }
-    
-    /**
-     * Validate JSON structure for a given service method
-     */
-    public boolean validateJsonStructure(String serviceName, String methodName, String jsonInput) {
-        try {
-            if (jsonInput == null || jsonInput.trim().isEmpty()) {
-                return false;
-            }
-            
-            // Basic JSON validation
-            String trimmed = jsonInput.trim();
-            return (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
-                   (trimmed.startsWith("[") && trimmed.endsWith("]"));
-                   
-        } catch (Exception e) {
-            return false;
-        }
-    }
-    
-    /**
-     * Get package name
-     */
-    public String getPackageName() {
-        return packageName;
-    }
-    public String getDebugInfo() {
-        StringBuilder sb = new StringBuilder();
-        sb.append("=== Proto Parser Debug Info ===\n");
-        
-        for (Map.Entry<String, List<String>> entry : serviceToMethods.entrySet()) {
-            String serviceName = entry.getKey();
-            List<String> methods = entry.getValue();
-            
-            sb.append("Service: ").append(serviceName).append("\n");
-            
-            for (String method : methods) {
-                String requestType = getRequestType(serviceName, method);
-                String responseType = getResponseType(serviceName, method);
-                sb.append("  - ").append(method)
-                  .append("(").append(requestType).append(")")
-                  .append(" returns (").append(responseType).append(")\n");
-            }
-            sb.append("\n");
-        }
-        
-        return sb.toString();
-    }
+    public String getPackageName() { return packageName; }
+    public String getDebugInfo() { return fileDescriptor != null ? fileDescriptor.toProto().toString() : ""; }
 }
