@@ -16,7 +16,6 @@ import org.slf4j.LoggerFactory;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
@@ -25,7 +24,6 @@ public class GrpcWebSampler extends AbstractSampler implements TestStateListener
     private static final Logger log = LoggerFactory.getLogger(GrpcWebSampler.class);
     private static final Map<String, ProtoFileParser> PROTO_CACHE = new ConcurrentHashMap<>();
 
-    // JMeter property names
     public static final String PROTO_FILE_PATH = "GrpcWebSampler.protoFilePath";
     public static final String SERVER_URL      = "GrpcWebSampler.serverUrl";
     public static final String SERVICE_NAME    = "GrpcWebSampler.serviceName";
@@ -47,6 +45,7 @@ public class GrpcWebSampler extends AbstractSampler implements TestStateListener
         SampleResult result = new SampleResult();
         result.setSampleLabel(getName());
         result.setDataType(SampleResult.TEXT);
+
         try {
             if (grpcClient == null) {
                 grpcClient = new GrpcWebClient(getServerUrl(), getTimeoutSeconds());
@@ -74,19 +73,6 @@ public class GrpcWebSampler extends AbstractSampler implements TestStateListener
             }
             req.setHeaders(parseCustomHeaders());
 
-            result.setSampleLabel("gRPC-Web Sampler");
-            result.setDataType(SampleResult.TEXT);
-            result.setContentType("application/json");
-             // Set request body to JMeter viewer
-            result.setSamplerData(getRequestJson()); // <-- this shows the request in JMeter UI
-
-            // Set request JSON and headers (to appear in JMeter sampler tab)
-            StringBuilder requestBuilder = new StringBuilder();
-            requestBuilder.append("POST ").append(getMethodName()).append("\n");
-            req.getHeaders().forEach((k, v) -> requestBuilder.append(k).append(": ").append(v).append("\n"));
-            requestBuilder.append("\n").append(getRequestJson());
-            result.setSamplerData(requestBuilder.toString());
-
             result.sampleStart();
             GrpcWebResponse resp = grpcClient.executeRequest(req);
             result.sampleEnd();
@@ -96,13 +82,21 @@ public class GrpcWebSampler extends AbstractSampler implements TestStateListener
             result.setResponseMessage(resp.getGrpcStatus() == 0 ? "OK" : resp.getGrpcMessage());
             result.setLatency(resp.getResponseTime());
 
-            // Set response headers and body to show in JMeter UI
+            // Set response headers
             StringBuilder responseHeaders = new StringBuilder();
             responseHeaders.append("HTTP/1.1 ").append(resp.getHttpStatusCode()).append("\n");
             resp.getHeaders().forEach((k, v) -> responseHeaders.append(k).append(": ").append(v).append("\n"));
             result.setResponseHeaders(responseHeaders.toString());
 
-            // Convert entire protobuf response message to JSON dynamically
+            // Set request headers
+            StringBuilder requestHeaders = new StringBuilder();
+            resp.getRequestHeaders().forEach((k, v) -> requestHeaders.append(k).append(": ").append(v).append("\n"));
+            result.setRequestHeaders(requestHeaders.toString());
+
+            // Set request body (just the JSON)
+            result.setSamplerData(getRequestJson());
+
+            // Decode response
             DynamicMessage.Builder builder = parser.getOutputMessageBuilder(
                     getServiceName(), getMethodName());
             builder.mergeFrom(resp.getMessageBytes());
@@ -110,7 +104,7 @@ public class GrpcWebSampler extends AbstractSampler implements TestStateListener
                     .includingDefaultValueFields()
                     .print(builder);
             result.setResponseData(responseJson, StandardCharsets.UTF_8.name());
-            
+
         } catch (Exception e) {
             result.sampleEnd();
             result.setSuccessful(false);
@@ -135,7 +129,6 @@ public class GrpcWebSampler extends AbstractSampler implements TestStateListener
         );
     }
 
-    // Support GUI
     public void setProtoFilePath(String path)   { setProperty(PROTO_FILE_PATH, path); }
     public void setServerUrl(String url)        { setProperty(SERVER_URL, url); }
     public void setServiceName(String name)     { setProperty(SERVICE_NAME, name); }
@@ -145,7 +138,6 @@ public class GrpcWebSampler extends AbstractSampler implements TestStateListener
     public void setUseTextFormat(boolean tf)    { setProperty(USE_TEXT_FORMAT, tf); }
     public void setCustomHeaders(String hdr)    { setProperty(CUSTOM_HEADERS, hdr); }
 
-    // Expose parser for GUI
     public static ProtoFileParser getProtoParserForPath(String protoPath) {
         if (protoPath == null || protoPath.isEmpty()) return null;
         return PROTO_CACHE.computeIfAbsent(protoPath, path -> {
@@ -155,13 +147,11 @@ public class GrpcWebSampler extends AbstractSampler implements TestStateListener
         });
     }
 
-    // TestStateListener
     @Override public void testStarted(String host) {}
     @Override public void testStarted() { testStarted(""); }
     @Override public void testEnded(String host) { if (grpcClient != null) grpcClient.close(); }
     @Override public void testEnded() { testEnded(""); }
 
-    // Property getters
     public String getProtoFilePath()  { return getPropertyAsString(PROTO_FILE_PATH); }
     public String getServerUrl()      { return getPropertyAsString(SERVER_URL); }
     public String getServiceName()    { return getPropertyAsString(SERVICE_NAME); }
