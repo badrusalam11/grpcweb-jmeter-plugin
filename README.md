@@ -18,6 +18,7 @@ A JMeter plugin that enables testing gRPC-Web services with proto file support, 
 - Java 8 or higher
 - Apache Maven 3.6+
 - Apache JMeter 5.4+
+- Protoc: [download](https://github.com/protocolbuffers/protobuf/releases)
 
 ### Building from Source
 
