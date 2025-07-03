@@ -16,6 +16,7 @@ import org.slf4j.LoggerFactory;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
@@ -76,8 +77,15 @@ public class GrpcWebSampler extends AbstractSampler implements TestStateListener
             result.setSampleLabel("gRPC-Web Sampler");
             result.setDataType(SampleResult.TEXT);
             result.setContentType("application/json");
-            // Set request body to JMeter viewer
+             // Set request body to JMeter viewer
             result.setSamplerData(getRequestJson()); // <-- this shows the request in JMeter UI
+
+            // Set request JSON and headers (to appear in JMeter sampler tab)
+            StringBuilder requestBuilder = new StringBuilder();
+            requestBuilder.append("POST ").append(getMethodName()).append("\n");
+            req.getHeaders().forEach((k, v) -> requestBuilder.append(k).append(": ").append(v).append("\n"));
+            requestBuilder.append("\n").append(getRequestJson());
+            result.setSamplerData(requestBuilder.toString());
 
             result.sampleStart();
             GrpcWebResponse resp = grpcClient.executeRequest(req);
@@ -88,6 +96,12 @@ public class GrpcWebSampler extends AbstractSampler implements TestStateListener
             result.setResponseMessage(resp.getGrpcStatus() == 0 ? "OK" : resp.getGrpcMessage());
             result.setLatency(resp.getResponseTime());
 
+            // Set response headers and body to show in JMeter UI
+            StringBuilder responseHeaders = new StringBuilder();
+            responseHeaders.append("HTTP/1.1 ").append(resp.getHttpStatusCode()).append("\n");
+            resp.getHeaders().forEach((k, v) -> responseHeaders.append(k).append(": ").append(v).append("\n"));
+            result.setResponseHeaders(responseHeaders.toString());
+
             // Convert entire protobuf response message to JSON dynamically
             DynamicMessage.Builder builder = parser.getOutputMessageBuilder(
                     getServiceName(), getMethodName());
@@ -96,6 +110,7 @@ public class GrpcWebSampler extends AbstractSampler implements TestStateListener
                     .includingDefaultValueFields()
                     .print(builder);
             result.setResponseData(responseJson, StandardCharsets.UTF_8.name());
+            
         } catch (Exception e) {
             result.sampleEnd();
             result.setSuccessful(false);

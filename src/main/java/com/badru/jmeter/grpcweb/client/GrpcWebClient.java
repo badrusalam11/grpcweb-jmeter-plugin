@@ -4,12 +4,14 @@ package com.badru.jmeter.grpcweb.client;
 import com.google.protobuf.DynamicMessage;
 import okhttp3.*;
 import okio.Buffer;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
@@ -34,13 +36,11 @@ public class GrpcWebClient {
     }
 
     public GrpcWebResponse executeRequest(GrpcWebRequest request) throws IOException {
-        // Build full URL
         String fullUrl = (request.getPackageName() != null && !request.getPackageName().isEmpty())
                 ? String.format("%s/%s.%s/%s", serverUrl, request.getPackageName(), request.getServiceName(), request.getMethodName())
                 : String.format("%s/%s/%s", serverUrl, request.getServiceName(), request.getMethodName());
         log.info("[Request URL] {}", fullUrl);
 
-        // Serialize message (text or protobuf)
         byte[] bodyBytes;
         if (request.isUseTextFormat()) {
             String json = request.getJsonText();
@@ -52,7 +52,6 @@ public class GrpcWebClient {
             log.debug("[Request Protobuf bytes size] {}", bodyBytes.length);
         }
 
-        // Wrap as gRPC-Web frame
         Buffer buf = new Buffer();
         buf.writeByte(0x0);
         buf.writeInt(bodyBytes.length);
@@ -60,9 +59,7 @@ public class GrpcWebClient {
         byte[] grpcWebPayload = buf.readByteArray();
         log.debug("[gRPC-Web payload (base64)] {}", Base64.getEncoder().encodeToString(grpcWebPayload));
 
-        // Prepare HTTP request
-        MediaType mediaType = MediaType.parse(CONTENT_TYPE_GRPC_WEB);
-        RequestBody reqBody = RequestBody.create(mediaType, grpcWebPayload);
+        RequestBody reqBody = RequestBody.create(grpcWebPayload, MediaType.parse(CONTENT_TYPE_GRPC_WEB));
         Request.Builder builder = new Request.Builder()
                 .url(fullUrl)
                 .post(reqBody)
@@ -70,20 +67,27 @@ public class GrpcWebClient {
                 .addHeader("User-Agent", USER_AGENT)
                 .addHeader("X-Grpc-Web", "1")
                 .addHeader("Accept", "application/grpc-web+proto");
+
         if (request.getHeaders() != null) {
             request.getHeaders().forEach(builder::addHeader);
         }
+
         Request okReq = builder.build();
         log.info("[Request Headers] {}", okReq.headers());
 
-        // Execute
         Response resp = httpClient.newCall(okReq).execute();
+
+        Map<String, String> headerMap = new HashMap<>();
+        for (String name : resp.headers().names()) {
+            headerMap.put(name, resp.header(name));
+        }
+
         log.info("[Response Code] {}", resp.code());
         log.info("[Response Headers] {}", resp.headers());
+
         byte[] respBytes = resp.body().bytes();
         log.debug("[Raw response (base64)] {}", Base64.getEncoder().encodeToString(respBytes));
 
-        // Unframe and decode
         byte[] msgBytes = new byte[0];
         String jsonString = null;
         if (respBytes.length >= 5) {
@@ -99,12 +103,19 @@ public class GrpcWebClient {
             }
         }
 
-        return new GrpcWebResponse(resp.code(), 0, "OK", msgBytes, TimeUnit.SECONDS.toMillis(timeout), jsonString);
+        return new GrpcWebResponse(
+                resp.code(),
+                0,
+                "OK",
+                msgBytes,
+                TimeUnit.SECONDS.toMillis(timeout),
+                jsonString,
+                headerMap
+        );
     }
 
     public void close() {}
 
-    /** Request holder **/
     public static class GrpcWebRequest {
         private String packageName;
         private String serviceName;
@@ -136,7 +147,6 @@ public class GrpcWebClient {
         public void setHeaders(Map<String, String> headers) { this.headers = headers; }
     }
 
-    /** Response holder **/
     public static class GrpcWebResponse {
         private final int httpStatusCode;
         private final int grpcStatus;
@@ -144,14 +154,18 @@ public class GrpcWebClient {
         private final byte[] messageBytes;
         private final long responseTime;
         private final String jsonString;
+        private final Map<String, String> headers;
 
-        public GrpcWebResponse(int httpStatusCode, int grpcStatus, String grpcMessage, byte[] messageBytes, long responseTime, String jsonString) {
+        public GrpcWebResponse(int httpStatusCode, int grpcStatus, String grpcMessage,
+                               byte[] messageBytes, long responseTime, String jsonString,
+                               Map<String, String> headers) {
             this.httpStatusCode = httpStatusCode;
             this.grpcStatus = grpcStatus;
             this.grpcMessage = grpcMessage;
             this.messageBytes = messageBytes;
             this.responseTime = responseTime;
             this.jsonString = jsonString;
+            this.headers = headers;
         }
 
         public int getHttpStatusCode() { return httpStatusCode; }
@@ -160,6 +174,7 @@ public class GrpcWebClient {
         public byte[] getMessageBytes() { return messageBytes; }
         public long getResponseTime() { return responseTime; }
         public String getJsonString() { return jsonString; }
+        public Map<String, String> getHeaders() { return headers; }
         public boolean isSuccessful() { return grpcStatus == 0 && httpStatusCode == 200; }
     }
 }
