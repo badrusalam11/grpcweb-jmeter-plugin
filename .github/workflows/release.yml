@@ -24,17 +24,21 @@ jobs:
       - name: Extract version from tag
         id: extract_version
         run: |
-          echo "VERSION=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+          echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
 
       - name: Build with Maven
         run: mvn clean package -DskipTests
 
-      - name: Rename single JAR
+      - name: List target directory (debug)
+        run: ls -lah target
+
+      - name: Rename JAR
         run: |
           mkdir dist
-          cp target/*-plugin-*-shaded.jar dist/jmeter-grpc-web-plugin-${{ steps.extract_version.outputs.version }}.jar
+          cp target/jmeter-grpc-web-plugin-${{ steps.extract_version.outputs.version }}.jar \
+            dist/jmeter-grpc-web-plugin-${{ steps.extract_version.outputs.version }}.jar
 
-      - name: Upload JAR as artifact
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: jmeter-jar
@@ -48,7 +52,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Download JAR artifact
+      - name: Download artifact
         uses: actions/download-artifact@v4
         with:
           name: jmeter-jar
