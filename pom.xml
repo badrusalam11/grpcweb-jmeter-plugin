@@ -7,7 +7,7 @@
 
     <groupId>com.badru.jmeter</groupId>
     <artifactId>jmeter-grpc-web-plugin</artifactId>
-    <version>1.0.0</version>
+    <version>1.0.2</version>
     <packaging>jar</packaging>
 
     <name>JMeter gRPC-Web Plugin</name>
