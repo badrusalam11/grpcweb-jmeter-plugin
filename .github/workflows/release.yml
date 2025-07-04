@@ -38,7 +38,7 @@ jobs:
       - name: Rename JAR
         run: |
           mkdir dist
-          cp target/jmeter-grpc-web-plugin-1.0.0.jar \
+          cp target/jmeter-grpc-web-plugin-${{ steps.extract_version.outputs.version }}.jar \
             dist/jmeter-grpc-web-plugin-${{ steps.extract_version.outputs.version }}.jar
 
       - name: Upload artifact
