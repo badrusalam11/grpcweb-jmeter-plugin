@@ -36,18 +36,28 @@ public class ProtoFileParser {
         parseServices(cleaned);
 
         try {
-            Path descOut = Files.createTempFile("desc", ".pb");
-            String protoDir = protoPath.getParent().toString();
+            // Pakai absolute path untuk semuanya
+            Path protoPathAbs = protoPath.toAbsolutePath();                  // e.g. D:/.../auth.proto
+            Path protoDirAbs = protoPathAbs.getParent();                     // e.g. D:/.../protos
+            Path descOut = Files.createTempFile("desc", ".pb");              // temporary output file
+
+            System.out.println("protoFilePath: " + protoPathAbs);
+            System.out.println("protoDir: " + protoDirAbs);
+            System.out.println("descOut: " + descOut.toAbsolutePath());
+
+            // Build the protoc command
             ProcessBuilder pb = new ProcessBuilder(
                 "protoc",
                 "--descriptor_set_out=" + descOut.toAbsolutePath(),
                 "--include_imports",
-                "-I", protoDir,
-                protoPath.getFileName().toString()
+                "-I", protoDirAbs.toString(),                                // full absolute include path
+                protoPathAbs.toString()                                      // full absolute path to proto file
             );
-            pb.directory(new File(protoDir));
+
+            pb.directory(protoDirAbs.toFile());                              // working dir = proto folder
             Process proc = pb.start();
 
+            // Read stderr from protoc
             ByteArrayOutputStream errStream = new ByteArrayOutputStream();
             try (InputStream es = proc.getErrorStream()) {
                 byte[] buf = new byte[1024];
@@ -56,12 +66,14 @@ public class ProtoFileParser {
                     errStream.write(buf, 0, len);
                 }
             }
+
             int exit = proc.waitFor();
             if (exit != 0) {
                 String errMsg = new String(errStream.toByteArray(), StandardCharsets.UTF_8);
                 throw new IOException("protoc failed (exit " + exit + "): " + errMsg);
             }
 
+            // Parse descriptor set
             DescriptorProtos.FileDescriptorSet set;
             try (InputStream is = Files.newInputStream(descOut)) {
                 set = DescriptorProtos.FileDescriptorSet.parseFrom(is);
@@ -81,26 +93,29 @@ public class ProtoFileParser {
                 nameToFd.put(fdp.getName(), fd);
             }
 
-            String fileName = protoPath.getFileName().toString();
+            String fileName = protoPathAbs.getFileName().toString();
             fileDescriptor = nameToFd.get(fileName);
             if (fileDescriptor == null) {
                 for (Descriptors.FileDescriptor fd : nameToFd.values()) {
-                    if (fd.getName().equals(fileName)) {
+                    if (fd.getName().endsWith(fileName)) {
                         fileDescriptor = fd;
                         break;
                     }
                 }
             }
+
             if (fileDescriptor == null) {
-                throw new IOException("Failed to locate descriptor for " + protoPath);
+                throw new IOException("Failed to locate descriptor for " + protoPathAbs);
             }
 
             for (Descriptors.ServiceDescriptor svc : fileDescriptor.getServices()) {
                 serviceDescriptors.put(svc.getName(), svc);
             }
+
         } catch (Exception ex) {
             System.err.println("[ProtoFileParser] protoc descriptor generation failed: " + ex.getMessage());
         }
+
     }
 
     private void parseServices(String content) {

@@ -19,6 +19,8 @@ import java.util.Collections;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
+import org.apache.jmeter.testelement.property.BooleanProperty;
+
 
 public class GrpcWebSampler extends AbstractSampler implements TestStateListener {
     private static final Logger log = LoggerFactory.getLogger(GrpcWebSampler.class);
@@ -32,12 +34,14 @@ public class GrpcWebSampler extends AbstractSampler implements TestStateListener
     public static final String TIMEOUT_SECONDS = "GrpcWebSampler.timeoutSeconds";
     public static final String USE_TEXT_FORMAT = "GrpcWebSampler.useTextFormat";
     public static final String CUSTOM_HEADERS  = "GrpcWebSampler.customHeaders";
+    public static final String USE_RELATIVE_PATH    = "GrpcWebSampler.useRelativePath";
 
     private transient GrpcWebClient grpcClient;
 
     public GrpcWebSampler() {
         super();
         setName("gRPC-Web Request");
+        setProperty(new BooleanProperty(USE_RELATIVE_PATH, false)); 
     }
 
     @Override
@@ -137,6 +141,7 @@ public class GrpcWebSampler extends AbstractSampler implements TestStateListener
     public void setTimeoutSeconds(int seconds)  { setProperty(TIMEOUT_SECONDS, seconds); }
     public void setUseTextFormat(boolean tf)    { setProperty(USE_TEXT_FORMAT, tf); }
     public void setCustomHeaders(String hdr)    { setProperty(CUSTOM_HEADERS, hdr); }
+    public void setUseRelativePath(boolean use) { setProperty(USE_RELATIVE_PATH, use); }
 
     public static ProtoFileParser getProtoParserForPath(String protoPath) {
         if (protoPath == null || protoPath.isEmpty()) return null;
@@ -160,4 +165,5 @@ public class GrpcWebSampler extends AbstractSampler implements TestStateListener
     public int    getTimeoutSeconds() { return getPropertyAsInt(TIMEOUT_SECONDS, 30); }
     public boolean getUseTextFormat() { return getPropertyAsBoolean(USE_TEXT_FORMAT, false); }
     public String getCustomHeaders()  { return getPropertyAsString(CUSTOM_HEADERS); }
+    public boolean getUseRelativePath(){ return getPropertyAsBoolean(USE_RELATIVE_PATH); }
 }

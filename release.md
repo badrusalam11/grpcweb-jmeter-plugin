@@ -1,43 +1,31 @@
-# gRPC-Web Plugin for JMeter - Release v1.0.1
+# gRPC-Web JMeter Plugin - Release Notes
 
-We are excited to release **v1.0.1** of the **gRPC-Web Plugin for JMeter**!
+## Version 1.0.2 - July 4, 2025
 
-This plugin allows testers to send **gRPC-Web requests** directly from JMeter by simply:
-- Providing the `.proto` file
-- Writing the request in **JSON format**
-- Automatically encoding it to binary
-- Parsing and asserting the gRPC response
+### ✨ New Features
 
----
+* **Support for Relative Proto Paths**
 
-## 🚀 Features
+  * Added a checkbox UI (`Use relative path`) to toggle storing proto file paths as relative to the working directory (`user.dir`).
+  * This improves portability of `.jmx` test plans across different machines.
 
-- 🧪 Send gRPC-Web requests using OkHttp
-- 📄 JSON-based request body input (like Kreya)
-- 📦 Supports `.proto` file parsing and method resolution
-- ✅ Automatic Protobuf message encoding/decoding
-- 📊 Built-in assertion integration with JMeter
-- 🛠️ Easy debugging with request/response logging
+### ✅ Enhancements
 
----
+* Automatically converts proto file path to **absolute** when running `protoc`, avoiding common path resolution errors.
+* Improved error handling and logging when parsing `.proto` files.
+* Better support for multi-service `.proto` files — combo boxes are dynamically restored when reloading a saved test plan.
 
-## 📂 Installation
+### 🐞 Bug Fixes
 
-1. Download the `jmeter-grpc-web-plugin-1.0.1.jar` from the **Assets** section below.
-2. Place it into your JMeter's `lib/ext` directory.
-3. Restart JMeter.
+* Fixed a bug where reloading a test plan did not restore the selected "Use relative path" checkbox state.
+* Fixed edge case where `protoc` would fail on Windows due to inconsistent path separators.
 
----
+### 🔧 Developer Notes
 
-## 📝 Changelog
-
-- Initial release with full gRPC-Web request support.
-- JSON-to-Protobuf encoding.
-- Response parsing and assertion support.
-- Simple, drop-in `.proto` + JSON workflow.
+* `GrpcWebSamplerGui` now stores the `useRelativePath` setting via `GrpcWebSampler.setUseRelativePath()` and restores it with `getUseRelativePath()`.
+* All `protoc` invocations now use `absolute` paths internally, even when relative path is enabled in GUI.
+* Logging improved with more granular `System.out` and `System.err` for debugging failures.
 
 ---
 
-**Happy Testing! 🚀**
-
-👉 Visit the GitHub repo for more info: [github.com/badrusalam11/grpcweb-jmeter-plugin](https://github.com/badrusalam11/grpcweb-jmeter-plugin)
+Thank you for using the gRPC-Web JMeter Plugin! If you encounter issues or want to contribute, visit [GitHub Repo](https://github.com/badrusalam11/grpcweb-jmeter-plugin).

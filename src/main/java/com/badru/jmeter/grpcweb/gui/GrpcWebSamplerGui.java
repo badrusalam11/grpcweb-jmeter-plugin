@@ -32,6 +32,7 @@ public class GrpcWebSamplerGui extends AbstractSamplerGui {
     private JTextField timeoutField;
     private JCheckBox useTextFormatCheckBox;
     private JTextArea customHeadersArea;
+    private JCheckBox useRelativeCheck;
     
     private ProtoFileParser protoParser;
     
@@ -67,6 +68,7 @@ public class GrpcWebSamplerGui extends AbstractSamplerGui {
             sampler.setServiceName((String) serviceComboBox.getSelectedItem());
             sampler.setMethodName((String) methodComboBox.getSelectedItem());
             sampler.setRequestJson(requestJsonArea.getText());
+            sampler.setUseRelativePath(useRelativeCheck.isSelected());
             
             // Safe timeout parsing
             try {
@@ -94,7 +96,9 @@ public class GrpcWebSamplerGui extends AbstractSamplerGui {
             timeoutField.setText(String.valueOf(sampler.getTimeoutSeconds()));
             useTextFormatCheckBox.setSelected(sampler.getUseTextFormat());
             customHeadersArea.setText(sampler.getCustomHeaders());
-            
+            // set useRelativeCheck here
+            useRelativeCheck.setSelected(sampler.getUseRelativePath());
+
             // Restore parsed services if available - FIXES PERSISTENCE!
             String protoPath = sampler.getProtoFilePath();
             if (protoPath != null && !protoPath.trim().isEmpty()) {
@@ -182,6 +186,30 @@ public class GrpcWebSamplerGui extends AbstractSamplerGui {
         JButton parseButton = new JButton("Parse");
         parseButton.addActionListener(new ParseAction());
         panel.add(parseButton);
+
+        useRelativeCheck = new JCheckBox("Use relative path");
+        panel.add(useRelativeCheck);
+        // check box event
+        useRelativeCheck.addActionListener((ActionEvent e) -> {
+            String current = protoFilePathField.getText().trim();
+            if (current.isEmpty()) return;
+
+            File file = new File(current);
+            try {
+                if (useRelativeCheck.isSelected()) {
+                    File base = new File(System.getProperty("user.dir"));
+                    String rel = base.toPath().relativize(file.getCanonicalFile().toPath()).toString();
+                    protoFilePathField.setText(rel);
+                    // ✅ FIXED: use user.dir as base for relative path
+                } else {
+                    // If already absolute, keep it; otherwise, make it absolute from base
+                    File abs = file.isAbsolute() ? file : new File(System.getProperty("user.dir"), current);
+                    protoFilePathField.setText(abs.getCanonicalPath());
+                }
+            } catch (Exception ex) {
+                ex.printStackTrace(); // 🔧 log error instead of silently ignoring
+            }
+        });
         
         return panel;
     }
